@@ -19,6 +19,35 @@ pip install -r requirements.txt
 python PrepitXMLBuilder.py
 ```
 
+## Run from Task Scheduler
+
+1. Create the batch wrapper file in the project root:
+
+```bat
+@echo off
+cd /d C:\PrepitXMLBuilder
+C:\PrepitXMLBuilder\.venv\Scripts\python.exe C:\PrepitXMLBuilder\PrepitXMLBuilder.py
+```
+
+2. Open Task Scheduler and create a new task.
+3. General:
+   - Name: `PrepitXMLBuilder Startup`
+   - Select `Run whether user is logged on or not`
+   - Check `Run with highest privileges`
+4. Trigger:
+   - New -> `At startup`
+5. Action:
+   - Start a program
+   - Program/script: `C:\PrepitXMLBuilder\run_prepit.bat`
+   - Start in: `C:\PrepitXMLBuilder`
+6. Conditions:
+   - Uncheck `Start the task only if the computer is on AC power` if needed.
+7. Settings:
+   - Check `Allow task to be run on demand`
+   - Optional: `If the task fails, restart every: 1 minute`, up to 3 times.
+
+Test the task manually first, then reboot to verify it starts automatically.
+
 ## Environment Variables
 
 - `FOLDER_TO_MONITOR`: Folder containing the source XML file.
