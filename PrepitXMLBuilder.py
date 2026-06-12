@@ -241,6 +241,8 @@ class SpecificXMLHandler(FileSystemEventHandler):
             return
 
         logging.info("Detected change in %s", source_path)
+        # Small delay to avoid reading the file while it's still being written
+        time.sleep(0.5)
         try:
             output_path = process_xml_file(source_path, self.settings)
             logging.info("Generated XML: %s", output_path)
