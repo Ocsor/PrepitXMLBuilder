@@ -151,8 +151,11 @@ def load_job_details(out_folder: Path, filename: str) -> JobDetails:
     job_xml_path = out_folder / filename.replace(".pdf", ".xml")
     if not job_xml_path.exists():
         return JobDetails()
-
-    tree = ET.parse(job_xml_path)
+    try:
+        tree = parse_xml_with_retries(job_xml_path)
+    except Exception:
+        logging.exception("Failed to parse job XML %s", job_xml_path)
+        return JobDetails()
     root = tree.getroot()
 
     panel = root.find(".//Panels/Panel0")
@@ -218,8 +221,34 @@ def build_output_xml(source_root: ET.Element, settings: Settings) -> tuple[ET.El
     return ET.ElementTree(new_root), unique_code
 
 
+def parse_xml_with_retries(file_path: Path, attempts: int = 5, delay: float = 0.5) -> ET.ElementTree:
+    """Parse an XML file with retries to handle file locks or partial writes.
+
+    Raises the last exception if all attempts fail.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return ET.parse(file_path)
+        except (ET.ParseError, PermissionError, OSError) as exc:
+            last_exc = exc
+            logging.debug(
+                "Attempt %d/%d parsing %s failed: %s",
+                attempt,
+                attempts,
+                file_path,
+                exc,
+            )
+            time.sleep(delay)
+
+    # All attempts failed
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Unknown error parsing XML")
+
+
 def process_xml_file(file_path: Path, settings: Settings) -> Path:
-    tree = ET.parse(file_path)
+    tree = parse_xml_with_retries(file_path)
     output_tree, unique_code = build_output_xml(tree.getroot(), settings)
 
     settings.save_folder.mkdir(parents=True, exist_ok=True)
@@ -242,7 +271,7 @@ class SpecificXMLHandler(FileSystemEventHandler):
 
         logging.info("Detected change in %s", source_path)
         # Small delay to avoid reading the file while it's still being written
-        time.sleep(0.5)
+        time.sleep(1.0)
         try:
             output_path = process_xml_file(source_path, self.settings)
             logging.info("Generated XML: %s", output_path)
