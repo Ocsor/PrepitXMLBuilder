@@ -62,3 +62,5 @@ Test the task manually first, then reboot to verify it starts automatically.
 - `.env` is ignored so local machine paths stay out of source control.
 - `.env.example` is included so another machine can be configured quickly.
 - `requirements.txt` pins the runtime dependencies needed by the watcher.
+
+Change added  
