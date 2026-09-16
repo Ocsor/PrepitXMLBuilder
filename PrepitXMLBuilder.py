@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 
 from dotenv import load_dotenv
 from watchdog.events import FileSystemEventHandler
@@ -260,23 +261,65 @@ def process_xml_file(file_path: Path, settings: Settings) -> Path:
 class SpecificXMLHandler(FileSystemEventHandler):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.source_path = settings.folder_to_monitor / settings.specific_file
+        self._lock = Lock()
+        self._last_processed_signature: tuple[int, int] | None = None
 
-    def on_modified(self, event) -> None:
-        if event.is_directory:
+    def _signature(self, source_path: Path) -> tuple[int, int]:
+        stat = source_path.stat()
+        return stat.st_mtime_ns, stat.st_size
+
+    def process_if_changed(self, source_path: Path | None = None) -> None:
+        source_path = source_path or self.source_path
+        if not source_path.exists():
             return
 
-        source_path = Path(event.src_path)
         if source_path.name != self.settings.specific_file:
             return
 
-        logging.info("Detected change in %s", source_path)
-        # Small delay to avoid reading the file while it's still being written
-        time.sleep(1.0)
-        try:
-            output_path = process_xml_file(source_path, self.settings)
-            logging.info("Generated XML: %s", output_path)
-        except Exception as exc:
-            logging.exception("Failed to process %s: %s", source_path, exc)
+        with self._lock:
+            try:
+                before_signature = self._signature(source_path)
+            except OSError as exc:
+                logging.warning("Could not stat %s before processing: %s", source_path, exc)
+                return
+
+            if before_signature == self._last_processed_signature:
+                return
+
+            logging.info("Detected change in %s", source_path)
+            # Small delay to avoid reading the file while it's still being written.
+            time.sleep(1.0)
+
+            try:
+                output_path = process_xml_file(source_path, self.settings)
+                after_signature = self._signature(source_path)
+                if after_signature != before_signature:
+                    logging.info(
+                        "%s changed while processing; it will be retried.",
+                        source_path,
+                    )
+                    return
+                self._last_processed_signature = after_signature
+                logging.info("Generated XML: %s", output_path)
+            except Exception as exc:
+                logging.exception("Failed to process %s: %s", source_path, exc)
+
+    def _handle_file_event(self, event) -> None:
+        if event.is_directory:
+            return
+        self.process_if_changed(Path(event.src_path))
+
+    def on_created(self, event) -> None:
+        self._handle_file_event(event)
+
+    def on_modified(self, event) -> None:
+        self._handle_file_event(event)
+
+    def on_moved(self, event) -> None:
+        if event.is_directory:
+            return
+        self.process_if_changed(Path(event.dest_path))
 
 
 def monitor_folder(settings: Settings) -> None:
@@ -289,10 +332,18 @@ def monitor_folder(settings: Settings) -> None:
         settings.folder_to_monitor,
         settings.specific_file,
     )
+    observer_warning_logged = False
 
     try:
         while True:
             time.sleep(settings.poll_interval_seconds)
+            if not observer.is_alive():
+                if not observer_warning_logged:
+                    logging.warning(
+                        "File system observer stopped unexpectedly; continuing with polling fallback."
+                    )
+                    observer_warning_logged = True
+            event_handler.process_if_changed()
     except KeyboardInterrupt:
         logging.info("Stopping monitor...")
         observer.stop()
