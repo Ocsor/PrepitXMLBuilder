@@ -269,12 +269,19 @@ class SpecificXMLHandler(FileSystemEventHandler):
         stat = source_path.stat()
         return stat.st_mtime_ns, stat.st_size
 
+    def _exists_accessible(self, source_path: Path) -> bool:
+        try:
+            return source_path.exists()
+        except OSError as exc:
+            logging.warning("Could not access %s while checking for changes: %s", source_path, exc)
+            return False
+
     def process_if_changed(self, source_path: Path | None = None) -> None:
         source_path = source_path or self.source_path
-        if not source_path.exists():
+        if source_path.name != self.settings.specific_file:
             return
 
-        if source_path.name != self.settings.specific_file:
+        if not self._exists_accessible(source_path):
             return
 
         with self._lock:
